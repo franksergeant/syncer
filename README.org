@@ -1,0 +1,140 @@
+
+* Syncer, an Alpine Rsync Docker Image
+
+[[https://nepotism.net][Frank Sergeant]]
+
+<https://github.com/franksergeant/syncer>
+
+A 13.5 MB Docker image with Rsync and SSH for synchronizing volumes
+from a development machine to a production machine.
+
+It exposes port 22 and disallows SSH root password logins.  
+
+** Create your custom image container your public key
+
+For a remote user to =ssh= or =rsync= into the container, the user's
+public key must be present in the container's root's =known_hosts=
+file.  This will happen automatically if you first copy the remote
+user's public key into the build directory's =key.pub= file and then
+build the image from the Docker file, e.g.,
+
+: $ git clone https://github.com/franksergeant/syncer.git
+: (clone the project)
+: $ cd syncer
+: $ cp ~/.ssh/<mykeyfile>.pub key.pub
+: (modify the project to use your own public key)
+: $ docker context use default
+: $ docker build . -t mysyncer
+
+In the above, replace =~/.ssh/<mykeyfile>.pub= with the actual name of
+your public key file.
+
+
+** Run the image locally or remotely
+
+: $ docker context use default
+: $ docker run -it --rm -d --name mysyncer -p 7022:22 -v myvolume:/mnt  mysyncer
+
+runs the image locally with the volume =myvolume= mounted on the
+container's =/mnt= directory.
+
+You can then start a shell on the running container with
+
+: $ docker exec -it mysyncer ash
+ 
+and poke around in it.  Or with or without running =exec=, you can
+open another terminal on your local machine and log in as root,
+without a password, with
+
+: $ ssh -p 7022 root@localhost
+
+When through with the =mysyncer= container, kill it with
+
+: $ docker container kill mysyncer
+
+To run as above, except on a remote host named =prod.com=, 
+
+ - copy the =mysyncer= image to =prod.com= 
+
+   - by pushing it to Docker Hub (or some other repository) (see the
+     =docker image push= command), or
+
+   - by saving it to a tar file (see the =docker image save= command),
+     copying the tar file to =prod.com=, then loading the tar file
+     into the Docker daemon on =prod.com= (see the =docker image load=
+     command).
+
+ - create a Docker context for =prod.com=, then =use= that context,
+   e.g.,
+
+   : $ docker context ls
+   : $ docker context create prod --docker "host=ssh//root@prod.com"
+   : $ docker context use prod
+
+Then when you type the following command on your local machine it will
+actually run on =prod.com=.
+
+: $ docker run -it --rm -d --name mysyncer -p 7022:22 -v myvolume:/mnt  mysyncer
+
+
+** Example use case
+
+You develop a static website (maybe even a dynamic website) on a local
+machine but deploy it as a Docker service on a remote host named
+=prod.com=.  The website resides in a Docker volume named =web1= on
+the remote host.
+
+Instead of redeploying the docker image to =prod.com= each time you
+make a change, you temporarily fire up your =mysyncer= container on
+the remote host, attaching the remote volume to it, then rsync from
+the development machine to the remote volume.
+
+You can use your =mysyncer= image to 
+
+ - initialize the remote volume from the development machine with rsync
+
+ - rsync changes from the development website to the remote volume
+
+You fire up a container from your =mysyncer= image only when needed to
+run =rsync=, then kill the container.
+
+
+** Initializing a remote website volume
+
+Suppose the master copy of the website is on your development machine
+in the directory =~/vh/web1= and the deployed website on the remote
+host will be in the volume named =web1=.  Suppose the remote host is
+=prod.com=.
+
+Before you deploy the website for the first time, you can create the
+volume on the remote host, then initialize it using your =mysyncer=
+image.  Then, when you to deploy the website, the volume will be
+ready.
+
+: $ docker context create prod --docker "host=ssh//root@prod"
+  (if not already done)
+
+: $ docker context use prod
+
+: $ docker run -it -d --name mysyncer -v web1:/mnt  -p 7022:22  mysyncer 
+  (this creates the volume if it does not already exist)
+
+: $ rsync -e "ssh -p 7022" -av --delete  ~/vh/web1/ root@prod.com:/mnt
+  (this copies the development version of the website to the root of the volume)
+
+: $ docker kill mysyncer
+
+** Updating a remote website volume
+
+Just follow the previous procedure, i.e.,
+
+: $ docker context use prod
+: $ docker run -it -d --name mysyncer -v web1:/mnt  -p 7022:22  mysyncer 
+: $ rsync -e "ssh -p 7022" -av --delete  ~/vh/web1/ root@prod.com:/mnt
+: $ docker kill mysyncer
+
+** About
+
+Written by Frank Sergeant <https://nepotism.net> [[mailto:frank@nepotism.net][frank@nepotism.net]],
+released under the [[http://opensource.org/licenses/MIT][MIT license]].
+
